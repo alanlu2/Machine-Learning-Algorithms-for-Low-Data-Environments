@@ -39,7 +39,7 @@ def ncr(n, r):
 
 
 
-def get_pairs(X, y, n): #USE ALL POSSIBLE DATA
+def get_pairs(X, y, n):
     #train_bins is a list of 10 empty lists
     train_bins = [[] for _ in range(10)]
 
@@ -88,7 +88,6 @@ def get_pairs(X, y, n): #USE ALL POSSIBLE DATA
     left_sim_pair=sim_pairs[:,0,:,:]
     right_sim_pair=sim_pairs[:,1,:,:]
 
-
     dif_pairs=np.array(dif_pairs)
     dif_pairs=dif_pairs.reshape((len(dif_idxs),2,28,28,1))
 
@@ -121,14 +120,14 @@ def get_pairs(X, y, n): #USE ALL POSSIBLE DATA
 
 def get_model():
     ######################################## SIAMESE NETWORK ################################
+    #the CNN part of the SNN
     input = Input(input_shape)
     x = Conv2D(16, (3, 3), padding='same', activation='relu')(input)
     x = Conv2D(16, (3, 3), padding='same', activation='relu')(x)
     x = MaxPooling2D((2,2), strides=(2,2))(x)
     out = Flatten()(x)
 
-    #stabilize model
-
+    #encoded model that will be returned
     enc_model = Model(input, out)
 
     left_input = Input(input_shape)
@@ -137,7 +136,7 @@ def get_model():
     encoded_l = enc_model(left_input)
     encoded_r = enc_model(right_input)
 
-
+    #distance formula and final FC layer
     dist = subtract([encoded_l, encoded_r])
     x = Dense(32, activation='relu')(dist)
     x = BatchNormalization()(x)
@@ -167,24 +166,12 @@ mean_scores=[]
 overall_siamese=[]
 overall_testing=[]
 
-#data augmentation for 1 datapoint
+#choosing # of images per class
 rng=[2,3,4] #,5,6,7,8,9,10,20,30,40,50
 counter=0
 for choose in rng:
-    if(choose==1):
-        print("choose is 1!")
-        datagen = ImageDataGenerator(
-            rotation_range=40,
-            width_shift_range=0.2,
-            height_shift_range=0.2,
-            rescale=1./255,
-            shear_range=0.2,
-            zoom_range=0.2,
-            horizontal_flip=True,
-            fill_mode='nearest')
-    else:
-        print("") #data augmentation
 
+    #most of these variables end up being used for the average
     num_total_pairs= ncr(10*choose,2)
     num_sim_pairs= 10*ncr(choose,2)
     num_dif_pairs=num_total_pairs-num_sim_pairs
@@ -195,9 +182,11 @@ for choose in rng:
     best_holdout=0
     total_mean=0
     total_sim_mean=0
+
     for iteration in range(total_iterations):
         print("ITERATION:",iteration+1,"/",total_iterations)
 
+        #getting our training, validation, holding pairs
         train_images, train_labels, orig_tr_images, orig_tr_labels, train_sim_images, train_sim_labels = get_pairs(x_train, y_train, choose)
 
         val_images, val_labels, orig_val_images, orig_val_labels, val_sim_images, val_sim_labels = get_pairs(x_test[:int(len(x_test)/2)], y_test[:int(len(x_test)/2)], choose)
@@ -207,8 +196,6 @@ for choose in rng:
 
         ######################## TRAINING ##########################
 
-        #siamese_net = get_model()
-
         # defining the callbacks
         filepath='snnbestweights'+str(choose)+'.hdf5'
         callbacks = [
@@ -217,17 +204,18 @@ for choose in rng:
             LearningRateScheduler(schedule=lambda epoch: 0.001 * (0.9 ** epoch)),
         ]
 
-
         #------------------------siamese model---------------------------------
         highest_score=0
         val_scores = {}
         scores=[]
         simscores=[]
 
+        #setting different and similar weights - necessary for an unbalanced model
         sim_weight=0.915
         dif_weight=1-sim_weight
         sample_weights=[sim_weight]*num_sim_pairs+[dif_weight]*num_dif_pairs
         sample_weights=np.array(sample_weights)
+
 
         print("Siamese accuracy for:",choose,"images per class")
         #THIS LOOP TRIES TO FIND THE BEST MODEL
@@ -250,6 +238,7 @@ for choose in rng:
 
             holdscore = siamese_net.evaluate(hold_images, hold_labels,verbose=1)[1]
 
+            #noting the similar scores.  We want to make sure the model is actually learning similar pairs
             sim_trainscore = siamese_net.evaluate(train_sim_images, train_sim_labels,verbose=1)[1]
 
             sim_valscore = siamese_net.evaluate(val_sim_images, val_sim_labels,verbose=1)[1]
@@ -269,7 +258,7 @@ for choose in rng:
                 snn=siamese_net
                 encoded_model=encoded
 
-
+        #highest scores from the best model
         print("highest score",highest_score)
 
         scores = np.array(scores)
@@ -297,6 +286,7 @@ for choose in rng:
         total_sim_mean=total_sim_mean+simscores.mean(axis=0)
 
         #---------------------------------knn model------------------------------
+        #we now get the encoded models of the images
         print("...testing on knn model...")
         enc_train_imgs=encoded_model.predict(orig_tr_images) #x_train
         enc_hold_imgs=encoded_model.predict(orig_hold_images) #x_test
@@ -326,13 +316,15 @@ for choose in rng:
 
     	# re-train our classifier using the best k values
         knnmodel = KNeighborsClassifier(n_neighbors=kVals[j])
-        #knnmodel = KNeighborsClassifier(n_neighbors=choose)
+
+        #making our regular prediction and encoded predictions
         knnmodel.fit(orig_tr_images, orig_tr_labels)
         reg_predict = knnmodel.predict(orig_hold_images)
 
         knnmodel.fit(enc_train_imgs, orig_tr_labels)
         enc_predict = knnmodel.predict(enc_hold_imgs)
 
+        #getting our regular accuracy and encoded accuracy
         reg_acc=accuracy_score(orig_hold_labels, reg_predict)
         enc_acc=accuracy_score(orig_hold_labels, enc_predict)
 
@@ -341,7 +333,7 @@ for choose in rng:
         print("enc accuracy: ", enc_acc)
         total_reg_acc_score=total_reg_acc_score+reg_acc
         total_enc_acc_score=total_enc_acc_score+enc_acc
-        
+
         print("-------------------------------------")
     #TAKE THE AVERAGE OF THE ALL OF THE RUNS
     avg_of_avgs=total_mean/total_iterations
