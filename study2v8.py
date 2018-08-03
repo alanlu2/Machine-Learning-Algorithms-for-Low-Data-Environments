@@ -147,6 +147,7 @@ def get_pairs(X,y,num1,num2):
 #############################################################################################
 def get_model():
     ######################################## SIAMESE NETWORK ################################
+    #CNN part of the SNN
     input = Input(input_shape)
     x = Conv2D(32, (3, 3), padding='same', activation='relu')(input)
     x = Conv2D(32, (3, 3), padding='same', activation='relu')(x)
@@ -160,6 +161,7 @@ def get_model():
     x = Dropout(0.25)(x)
     out = Flatten()(x)
 
+    #encoded model
     model = Model(input, out)
 
     left_input = Input(input_shape)
@@ -168,14 +170,11 @@ def get_model():
     encoded_l = model(left_input)
     encoded_r = model(right_input)
 
-    #dist = dot([encoded_l, encoded_r], 1)
-    #dist = concatenate([encoded_l, encoded_r])
+    #distance formula and final FC layer
     dist = subtract([encoded_l, encoded_r])
     x = Dense(128, activation='relu')(dist)
-    #x = BatchNormalization()(x)
     x = Dropout(0.4)(x)
     x = Dense(32, activation='relu')(x)
-    #x = BatchNormalization()(x)
     x = Dropout(0.4)(x)
     prediction = Dense(2, activation='softmax', name='output')(x)
     siamese_net = Model(inputs=[left_input,right_input], outputs=[prediction])
@@ -190,11 +189,10 @@ def get_model():
 
 ##############################################################################################
 
+#most of these variables are for finding the final average
 mean_scores=[]
 overall_siamese=[]
 overall_testing=[]
-
-
 total_reg_acc_score=0
 total_enc_acc_score=0
 total_mean=0
@@ -202,6 +200,8 @@ total_mean=0
 
 first_num_imgs=150 #number of images per class that we choose from the first half
 second_num_imgs=3000 #number of images per class in the second half
+
+#number of total, similar, and different pairs
 num_total_pairs= ncr(10*first_num_imgs,2)
 num_sim_pairs= 10*ncr(first_num_imgs,2)
 num_dif_pairs=num_total_pairs-num_sim_pairs
@@ -212,6 +212,7 @@ num_dif_pairs=num_total_pairs-num_sim_pairs
 for iteration in range(total_iterations):
     print("ITERATION:",iteration+1,"/",total_iterations)
 
+    #generating train, validation, and hold pairs
     train_images, train_labels, first_images, first_labels, second_images, second_labels = get_pairs(x_train, y_train, first_num_imgs,second_num_imgs)
 
     val_images, val_labels, first_val_images, first_val_labels, second_val_images, second_val_labels = get_pairs(x_test[:int(len(x_test)/2)], y_test[:int(len(y_test)/2)], 30,3) #300
@@ -232,8 +233,8 @@ for iteration in range(total_iterations):
     testing=[]
 
     print("Siamese accuracy for",first_num_imgs,"images per class")
-    #THIS LOOP TRIES TO FIND THE BEST MODEL
 
+    #fitting the snn
     siamese_net, encoded = get_model()
     siamese_net.fit(train_images,
         train_labels,
@@ -269,7 +270,6 @@ for iteration in range(total_iterations):
     first_images=first_images.reshape(first_num_imgs*10,784)
     second_images=second_images.reshape(second_num_imgs*10,784)
 
-
     #---------------------------------choose best k--------------------------
     kVals=range(1, 5)
     accuracies=[]
@@ -285,15 +285,17 @@ for iteration in range(total_iterations):
     # find the value of k that has the largest accuracy
     j = int(np.argmax(accuracies))
     print("k=%d achieved highest accuracy of %.2f%% on validation data" % (kVals[j],accuracies[j] * 100))
-    # re-train our classifier using the best k values
     knnmodel = KNeighborsClassifier(n_neighbors=kVals[j])
-    #knnmodel = KNeighborsClassifier(n_neighbors=choose)
+
+
+    #getting the predictions of the regular and encoded models
     knnmodel.fit(first_images, first_labels)
     reg_predict = knnmodel.predict(second_images)
 
     knnmodel.fit(enc_first_images, first_labels)
     enc_predict = knnmodel.predict(enc_second_images)
 
+    #getting the accuracies of the regular and encoded models
     reg_acc=accuracy_score(second_labels, reg_predict)
     enc_acc=accuracy_score(second_labels, enc_predict)
 

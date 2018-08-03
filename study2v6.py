@@ -40,6 +40,7 @@ x_test /= 255
 print("Training matrix shape", x_train.shape)
 print("Testing matrix shape", x_test.shape)
 
+#defining n choose r function
 def ncr(n, r):
     r = min(r, n-r)
     numer = functools.reduce(op.mul, range(n, n-r, -1), 1)
@@ -128,8 +129,8 @@ def get_pairs(X,y,num1,num2):
     all_pairs=np.concatenate((sim_pairs,dif_pairs))
     all_labels=new_sim_labels+new_dif_labels
 
+
     '''
-    print("...balancing for 50-50 baseline")
     #BALANCING THE TRAINING SET
     all_pairs=all_pairs[:len(sim_pairs)*2]
     all_labels=all_labels[:len(all_pairs)]
@@ -148,6 +149,7 @@ def get_pairs(X,y,num1,num2):
 #############################################################################################
 def get_model():
     ######################################## SIAMESE NETWORK ################################
+    #CNN part of the SNN
     input = Input(input_shape)
     x = Conv2D(32, (3, 3), padding='same', activation='relu')(input)
     x = Conv2D(32, (3, 3), padding='same', activation='relu')(x)
@@ -161,6 +163,7 @@ def get_model():
     x = Dropout(0.25)(x)
     out = Flatten()(x)
 
+    #encoded model
     model = Model(input, out)
 
     left_input = Input(input_shape)
@@ -169,14 +172,11 @@ def get_model():
     encoded_l = model(left_input)
     encoded_r = model(right_input)
 
-    #dist = dot([encoded_l, encoded_r], 1)
-    #dist = concatenate([encoded_l, encoded_r])
+    #distance formula and final fully connected layer
     dist = subtract([encoded_l, encoded_r])
     x = Dense(128, activation='relu')(dist)
-    #x = BatchNormalization()(x)
     x = Dropout(0.4)(x)
     x = Dense(32, activation='relu')(x)
-    #x = BatchNormalization()(x)
     x = Dropout(0.4)(x)
     prediction = Dense(2, activation='softmax', name='output')(x)
     siamese_net = Model(inputs=[left_input,right_input], outputs=[prediction])
@@ -203,6 +203,8 @@ total_mean=0
 
 first_num_imgs=150 #number of images per class that we choose from the first half
 second_num_imgs=3 #number of images per class in the second half
+
+#number of total, similar, different pairs
 num_total_pairs= ncr(10*first_num_imgs,2)
 num_sim_pairs= 10*ncr(first_num_imgs,2)
 num_dif_pairs=num_total_pairs-num_sim_pairs
@@ -213,6 +215,7 @@ num_dif_pairs=num_total_pairs-num_sim_pairs
 for iteration in range(total_iterations):
     print("ITERATION:",iteration+1,"/",total_iterations)
 
+    #generating training, validation, and hold pairs
     train_images, train_labels, first_images, first_labels, second_images, second_labels = get_pairs(x_train, y_train, first_num_imgs,second_num_imgs)
 
     val_images, val_labels, first_val_images, first_val_labels, second_val_images, second_val_labels = get_pairs(x_test[:int(len(x_test)/2)], y_test[:int(len(y_test)/2)], 30,3) #300
@@ -232,6 +235,7 @@ for iteration in range(total_iterations):
     scores=[]
     testing=[]
 
+    #defining similar and diffent weights, necessary for unbalanced model
     sim_weight=0.9007
     dif_weight=1-sim_weight
     sample_weights=[sim_weight]*num_sim_pairs+[dif_weight]*num_dif_pairs
@@ -239,8 +243,8 @@ for iteration in range(total_iterations):
 
 
     print("Siamese accuracy for",first_num_imgs,"images per class")
-    #THIS LOOP TRIES TO FIND THE BEST MODEL
 
+    #fitting the model on the snn
     siamese_net, encoded = get_model()
     siamese_net.fit(train_images,
         train_labels,
@@ -267,7 +271,7 @@ for iteration in range(total_iterations):
     print('Mean Scores:', scores.mean(axis=0))
     total_mean=total_mean+scores.mean(axis=0)
 
-    '''
+
     #---------------------------------knn model------------------------------
     print("...testing on knn model...")
     enc_first_images=encoded.predict(first_images)
@@ -296,13 +300,15 @@ for iteration in range(total_iterations):
     print("k=%d achieved highest accuracy of %.2f%% on validation data" % (kVals[j],accuracies[j] * 100))
     # re-train our classifier using the best k values
     knnmodel = KNeighborsClassifier(n_neighbors=kVals[j])
-    #knnmodel = KNeighborsClassifier(n_neighbors=choose)
+
+    #getting the predictions of the regular and encoded models
     knnmodel.fit(first_images, first_labels)
     reg_predict = knnmodel.predict(second_images)
 
     knnmodel.fit(enc_first_images, first_labels)
     enc_predict = knnmodel.predict(enc_second_images)
 
+    #getting the accuracies of the regular and encoded models
     reg_acc=accuracy_score(second_labels, reg_predict)
     enc_acc=accuracy_score(second_labels, enc_predict)
 
@@ -314,7 +320,7 @@ for iteration in range(total_iterations):
     total_enc_acc_score=total_enc_acc_score+enc_acc
     testing.append([reg_acc,enc_acc])
     np.savetxt("snn_testing_accuracies_s2_unbalanced"+str(iteration)+".csv",testing,delimiter=",")
-    '''
+
     print("-------------------------------------")
 
 #TAKE THE AVERAGE OF THE ALL OF THE RUNS
