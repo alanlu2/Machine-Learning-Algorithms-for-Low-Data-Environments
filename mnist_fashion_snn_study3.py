@@ -40,7 +40,7 @@ def ncr(n, r):
 
 
 
-def get_pairs(X, y, n): #USE ALL POSSIBLE DATA
+def get_pairs(X, y, n):
     #train_bins is a list of 10 empty lists
     train_bins = [[] for _ in range(10)]
 
@@ -89,7 +89,6 @@ def get_pairs(X, y, n): #USE ALL POSSIBLE DATA
     left_sim_pair=sim_pairs[:,0,:,:]
     right_sim_pair=sim_pairs[:,1,:,:]
 
-
     dif_pairs=np.array(dif_pairs)
     dif_pairs=dif_pairs.reshape((len(dif_idxs),2,28,28,1))
 
@@ -119,17 +118,19 @@ def get_pairs(X, y, n): #USE ALL POSSIBLE DATA
 
     return [left, right], pair_labels, np.array(images).reshape(len(images),28,28,1), labels, [left_sim_pair,right_sim_pair], sim_labels
 
+#tune the dropout to adjust hyperparameters
 dropout=0.7
 def get_model():
     ######################################## SIAMESE NETWORK ################################
+
+    #CNN part of the SNN
     input = Input(input_shape)
     x = Conv2D(16, (3, 3), padding='same', activation='relu')(input)
     x = Conv2D(16, (3, 3), padding='same', activation='relu')(x)
     x = MaxPooling2D((2,2), strides=(2,2))(x)
     out = Flatten()(x)
 
-    #stabilize model
-
+    #encoded model
     enc_model = Model(input, out)
 
     left_input = Input(input_shape)
@@ -138,7 +139,7 @@ def get_model():
     encoded_l = enc_model(left_input)
     encoded_r = enc_model(right_input)
 
-
+    #distance formula and final FC layer
     dist = subtract([encoded_l, encoded_r])
     x = Dense(32, activation='relu')(dist)
     x = BatchNormalization()(x)
@@ -152,6 +153,7 @@ def get_model():
     return siamese_net, enc_model
 
 ###################################### IMPORTING DATA ##################################
+#importing both mnist and fashion mnist data
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
 (fash_x_train, fash_y_train), (fash_x_test, fash_y_test) = fashion_mnist.load_data()
 
@@ -175,28 +177,17 @@ x_test /= 255
 print("Training matrix shape", x_train.shape)
 print("Testing matrix shape", x_test.shape)
 
+
 mean_scores=[]
 overall_siamese=[]
 overall_testing=[]
 
-#data augmentation for 1 datapoint
+#number of images per class used
 rng=[2,3,4,5,6,7,8,9,10]
 counter=0
 for choose in rng:
-    if(choose==1):
-        print("choose is 1!")
-        datagen = ImageDataGenerator(
-            rotation_range=40,
-            width_shift_range=0.2,
-            height_shift_range=0.2,
-            rescale=1./255,
-            shear_range=0.2,
-            zoom_range=0.2,
-            horizontal_flip=True,
-            fill_mode='nearest')
-    else:
-        print("") #data augmentation
 
+    #most of these variables are used for taking the average
     num_total_pairs= ncr(10*choose,2)
     num_sim_pairs= 10*ncr(choose,2)
     num_dif_pairs=num_total_pairs-num_sim_pairs
@@ -210,6 +201,7 @@ for choose in rng:
     for iteration in range(total_iterations):
         print("ITERATION:",iteration+1,"/",total_iterations)
 
+        #generating train, validation, and hold pairs for both mnist and fashion mnist
         train_images, train_labels, orig_tr_images, orig_tr_labels, train_sim_images, train_sim_labels = get_pairs(x_train, y_train, choose)
 
         val_images, val_labels, orig_val_images, orig_val_labels, val_sim_images, val_sim_labels = get_pairs(x_test[:int(len(x_test)/2)], y_test[:int(len(x_test)/2)], choose)
@@ -223,8 +215,6 @@ for choose in rng:
         fash_hold_images, fash_hold_labels, orig_fash_hold_images, orig_fash_hold_labels, fash_hold_sim_images, fash_hold_sim_labels = get_pairs(fash_x_test[int(len(fash_x_test)/2):], fash_y_test[int(len(fash_x_test)/2):], choose)
 
         ######################## TRAINING ##########################
-
-        #siamese_net = get_model()
 
         # defining the callbacks
         filepath='snnbestweights'+str(choose)+'_s3_v1.hdf5'
@@ -243,6 +233,7 @@ for choose in rng:
         save_scores=[]
         testing=[]
 
+        #defining the similar and different weights, necessary for unbalanced model
         sim_weight=float(1/((num_dif_pairs/num_sim_pairs)+1))*float(num_dif_pairs/num_sim_pairs)
         print(sim_weight)
         dif_weight=1-sim_weight
@@ -290,7 +281,7 @@ for choose in rng:
                 snn=siamese_net
                 encoded_model=encoded
 
-
+        #this is the highest score for the best model
         print("highest score",highest_score)
 
         scores = np.array(scores)
@@ -298,8 +289,6 @@ for choose in rng:
         print(scores)
         print('Mean Scores:', scores.mean(axis=0))
         total_mean=total_mean+scores.mean(axis=0)
-
-
 
         #retrain the model with correct model
         trainscore = snn.evaluate(train_images, train_labels,verbose=0)[1]
@@ -316,6 +305,7 @@ for choose in rng:
 
         print("best t,v,h:",trainscore,",", valscore,",", holdscore)
 
+        #we want to track the scores for the similar pairs to know that the model is actually learning something
         print("...")
         simscores = np.array(simscores)
         simscores = pd.DataFrame({'Train':simscores[:,0], 'Val':simscores[:,1], 'Hold':simscores[:,2]})
@@ -323,6 +313,7 @@ for choose in rng:
         print('Mean simscores:', simscores.mean(axis=0))
         total_sim_mean=total_sim_mean+simscores.mean(axis=0)
 
+        #transfer learning from mnist snn, now fitting on fashion_mnist data
         snn.fit(fash_train_images,
             fash_train_labels,
             batch_size=batch_size,
@@ -336,6 +327,7 @@ for choose in rng:
 
         #---------------------------------knn model------------------------------
         print("...testing on knn model...")
+        #creating encoded data
         enc_train_imgs=encoded_model.predict(orig_fash_tr_images) #x_train
         enc_hold_imgs=encoded_model.predict(orig_fash_hold_images) #x_test
 
@@ -366,13 +358,15 @@ for choose in rng:
 
     	# re-train our classifier using the best k values
         knnmodel = KNeighborsClassifier(n_neighbors=kVals[j])
-        #knnmodel = KNeighborsClassifier(n_neighbors=choose)
+
+        #making regular and encoded predictions
         knnmodel.fit(orig_fash_tr_images, orig_fash_tr_labels)
         reg_predict = knnmodel.predict(orig_fash_hold_images)
 
         knnmodel.fit(enc_train_imgs, orig_fash_tr_labels)
         enc_predict = knnmodel.predict(enc_hold_imgs)
 
+        #getting regular and encoded accuracies
         reg_acc=accuracy_score(orig_fash_hold_labels, reg_predict)
         enc_acc=accuracy_score(orig_fash_hold_labels, enc_predict)
 
